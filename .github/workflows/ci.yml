@@ -1,0 +1,79 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      live_eval:
+        description: "Run the live evaluation (needs the pack and an API key as secrets)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Unit tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e ".[dev]"
+      # The supplied pack is not in the repository, so integration tests skip here. M14: the gateway, clients and
+      # KB code must stay at >= 85% coverage from unit tests alone.
+      - run: >-
+          pytest -q --cov=member_services.gateway --cov=member_services.clients --cov=member_services.kb
+          --cov-report=term --cov-fail-under=85
+        env:
+          PACK_DIR: /nonexistent
+
+  report-gate:
+    name: Committed eval report meets thresholds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      # Fails if eval/thresholds.yaml is tightened beyond the committed report, or a regressed report is committed.
+      - run: python -m member_services.evaluation gate --report eval/report.json
+
+  live-eval:
+    name: Live evaluation and regression gate
+    if: github.event_name == 'workflow_dispatch' && inputs.live_eval
+    runs-on: ubuntu-latest
+    needs: tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.PACK_REPOSITORY }}
+          token: ${{ secrets.PACK_REPOSITORY_TOKEN }}
+          path: pack
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - run: python -m member_services.evaluation run --runs 3 --out eval/report-ci.json
+        env:
+          PACK_DIR: ${{ github.workspace }}/pack
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'claude-sonnet-5-5' }}
+          TENANT_TOKENS: ${{ secrets.TENANT_TOKENS }}
+          DIRECTORY_API_KEY: ${{ secrets.DIRECTORY_API_KEY }}
+          AS_OF_DATE: "2026-11-15"
+          TRACE_DIR: traces
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: eval/report-ci.*
