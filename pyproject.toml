@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "member-services-agent"
+version = "0.1.0"
+description = "Governed multi-tenant member-services assistant with a policy-enforcing tool gateway"
+requires-python = ">=3.11"
+dependencies = [
+  "anthropic==2.8.0",
+  "fastapi==0.162.4",
+  "uvicorn==0.54.0",
+  "httpx==0.28.1",
+  "pydantic==2.14.3",
+  "pydantic-settings==2.16.2",
+  "PyYAML==6.0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.2.0",
+  "pytest-asyncio==1.4.1.post1",
+  "pytest-cov==7.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: needs the supplied pack and the mock server"]
+addopts = "-ra"

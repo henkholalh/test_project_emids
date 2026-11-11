@@ -1,0 +1,43 @@
+# --- Supplied evaluation pack: never commit (client owns it; treat as real PHI) ---
+mock_services/
+kb/
+data/
+tools/
+eval/conversations.json
+BRIEF.md
+**/members.json
+**/claims.json
+**/accumulators.json
+**/grievances.json
+**/provider_directory.json
+**/tenants.json
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Runtime output (may contain redacted traces; keep out of git) ---
+traces/
+*.jsonl
+eval/runs/
+
+# --- Python ---
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# --- OS / editor ---
+.DS_Store
+.idea/
+.vscode/
