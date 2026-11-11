@@ -6,6 +6,7 @@ from environment variables or a local ``.env`` file. Nothing secret has a defaul
 """
 from __future__ import annotations
 
+import hmac
 import json
 import secrets
 from datetime import date
@@ -28,7 +29,7 @@ class Budgets(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="BUDGET_", env_file=REPO_ROOT / ".env", extra="ignore")
 
-    max_steps: int = Field(8, ge=1, le=50)
+    max_steps: int = Field(12, ge=1, le=50)  # model calls + tool calls per conversation
     max_cost_usd: float = Field(0.03, gt=0)
     max_latency_s: float = Field(10.0, gt=0)
 
@@ -49,6 +50,9 @@ class Settings(BaseSettings):
     # NoDecode: parse the JSON ourselves so a malformed value gives a clean error with no value echoed.
     tenant_tokens: Annotated[dict[str, SecretStr], NoDecode] = Field(default_factory=dict)
     directory_api_key: SecretStr | None = None
+    # Rep API keys mapped to the tenant they belong to: {"<key>": "plan_a"}. Stand-in for the production identity
+    # provider (OIDC), where the tenant comes from a signed claim in the rep's token.
+    rep_api_keys: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict, repr=False)
 
     budgets: Budgets = Field(default_factory=Budgets)
 
@@ -67,16 +71,16 @@ class Settings(BaseSettings):
     def _resolve_pack_dir(cls, v: Path) -> Path:
         return v if v.is_absolute() else (REPO_ROOT / v).resolve()
 
-    @field_validator("tenant_tokens", mode="before")
+    @field_validator("tenant_tokens", "rep_api_keys", mode="before")
     @classmethod
     def _parse_tokens(cls, v):
         if isinstance(v, str):
             try:
                 v = json.loads(v) if v.strip() else {}
             except json.JSONDecodeError as exc:
-                raise ValueError("TENANT_TOKENS must be a JSON object of tenant id to token") from exc
+                raise ValueError("must be a JSON object") from exc
         if not isinstance(v, dict):
-            raise ValueError("TENANT_TOKENS must be a JSON object of tenant id to token")
+            raise ValueError("must be a JSON object")
         return v
 
     @model_validator(mode="after")
@@ -96,6 +100,14 @@ class Settings(BaseSettings):
             return self.tenant_tokens[tenant].get_secret_value()
         except KeyError:
             raise ConfigError(f"No API token configured for tenant '{tenant}'") from None
+
+    def tenant_for_rep_key(self, key: str) -> str | None:
+        """Constant-time lookup of the tenant a rep API key belongs to."""
+        found = None
+        for k, tenant in self.rep_api_keys.items():
+            if hmac.compare_digest(k.encode(), (key or "").encode()):
+                found = tenant
+        return found
 
     def require_runtime(self) -> None:
         """Fail fast, with a clear message, when settings needed to serve traffic are missing."""
