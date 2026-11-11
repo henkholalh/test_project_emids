@@ -268,6 +268,8 @@ class ToolGateway:
                     item["has_notes"] = True  # details via get_claim
                 compact.append(item)
             ctx["claims"] = compact
+            ctx["claims_note"] = (f"Complete list: all {len(compact)} claims on file for this member, every page "
+                                  "read. Counts from it are final.")
         except UpstreamError:
             ctx["claims"] = "unavailable; use list_claims"
         product = (self._member or {}).get("product_code") or ""
