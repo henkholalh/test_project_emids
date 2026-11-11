@@ -40,7 +40,7 @@ class Judge:
         prompt = (f"Rep's question: {question}\n\nAssistant's answer: {answer}\n\nGrading question: "
                   f"{QUESTIONS[kind]}")
         from ..llm.pricing import cost_usd
-        resp = self.llm.complete(JUDGE_SYSTEM, [Message("user", text=prompt)], [], max_tokens=300)
+        resp = self.llm.complete(JUDGE_SYSTEM, [Message("user", text=prompt)], [], max_tokens=2000)
         with self._lock:
             self.calls += 1
             self.cost_usd += cost_usd(self.llm.model, resp.usage)

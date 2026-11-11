@@ -29,8 +29,15 @@ def _iso_dates(text: str) -> str:
     return _US_DATE.sub(lambda m: f"{m.group(3)}-{int(m.group(1)):02d}-{int(m.group(2)):02d}", text)
 
 
+_NUMBER_WORDS = {w: str(i) for i, w in enumerate(
+    ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+     "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"])}
+_NUMBER_WORD_RE = re.compile(r"\b(" + "|".join(_NUMBER_WORDS) + r")\b")
+
+
 def normalise(text: str) -> str:
     t = _iso_dates(_NUM_COMMA.sub("", (text or "").lower()))
+    t = _NUMBER_WORD_RE.sub(lambda m: _NUMBER_WORDS[m.group(1)], t)  # "three" == "3"
     t = re.sub(r"\$(\d+)\.00\b", r"$\1", t)  # $40.00 == $40
     t = t.replace("–", "-").replace("—", "-")
     return re.sub(r"\s+", " ", t).strip()
@@ -59,6 +66,12 @@ def fact_present(fact: str, answer: str) -> bool:
     words = [w for w in _WORD.findall(f) if w not in _FACT_STOP and not w.isdigit()]
     numbers = [w for w in _WORD.findall(re.sub(r"\$\S+", "", f)) if w.isdigit()]
     return all(w in a_words for w in words) and all(n in a_words for n in numbers)
+
+
+def leading_yes_no(answer: str) -> str | None:
+    """'yes' / 'no' when the answer opens with an explicit Yes or No, else None (then the judge decides)."""
+    m = re.match(r"\W*(yes|no)\b", (answer or "").lower())
+    return m.group(1) if m else None
 
 
 def says_match(answer: str) -> bool | None:

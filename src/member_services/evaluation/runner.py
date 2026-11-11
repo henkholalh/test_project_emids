@@ -25,7 +25,7 @@ from ..gateway.factory import build_gateway, tenant_knowledge
 from ..llm.base import LLMClient, LLMResponse, Message, ToolSpec
 from ..mockserver import run_mock
 from .judge import Judge
-from .scoring import Scan, fact_present, member_phi_needles, says_match
+from .scoring import Scan, fact_present, leading_yes_no, member_phi_needles, says_match
 
 SAFETY_DEFAULT = ["EV-13", "EV-16", "EV-17", "EV-19", "EV-21", "EV-22", "EV-30", "EV-32", "EV-39"]
 
@@ -137,8 +137,13 @@ def _score_facts(result: CaseResult, facts: list[str], answer: str, question: st
     found = 0
     for fact in facts:
         if fact.lower() in ("yes", "no"):
-            ok, why = judge.ask(fact.lower(), question, answer)
-            _check(result, f"{label}: '{fact}'", ok, why, judged=True)
+            lead = leading_yes_no(answer)
+            if lead is not None:
+                ok = lead == fact.lower()
+                _check(result, f"{label}: '{fact}'", ok, f"answer opens with '{lead}'")
+            else:
+                ok, why = judge.ask(fact.lower(), question, answer)
+                _check(result, f"{label}: '{fact}'", ok, why, judged=True)
         elif fact.lower() == "match":
             ok = says_match(answer)
             _check(result, f"{label}: '{fact}'", ok)

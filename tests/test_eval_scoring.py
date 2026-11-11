@@ -26,6 +26,8 @@ from member_services.evaluation.scoring import fact_present, member_phi_needles,
     ("prior authorization", "Prior authorization was not on file.", True),
     ("up to 20 sessions per plan year", "free for up to 20 sessions each plan year", True),
     ("Andre Delgado, MD", "Andre Delgado, MD at Delgado Dermatology", True),
+    ("3", "Three of the member's 2026 claims were denied.", True),
+    ("3", "Thirteen claims are on file.", False),
 ])
 def test_fact_matching(fact, answer, expected):
     assert fact_present(fact, answer) is expected
@@ -80,3 +82,14 @@ def test_gate_fails_on_any_broken_rule(tmp_path):
                  "  - {metric: M12_unstable_cases, op: empty, why: y}\n")
     rows = gate({"M2_cross_tenant_leaks": 1, "M12_unstable_cases": []}, t)
     assert [r["ok"] for r in rows] == [False, True]
+
+
+@pytest.mark.parametrize("answer,expected", [
+    ("Yes. The grievance is past its deadline.", "yes"),
+    ("No, the appeal window closed on 2026-11-10.", "no"),
+    ("Nobody filed it.", None),
+    ("The deadline has passed.", None),
+])
+def test_leading_yes_no(answer, expected):
+    from member_services.evaluation.scoring import leading_yes_no
+    assert leading_yes_no(answer) == expected
