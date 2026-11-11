@@ -1,0 +1,47 @@
+%% Architecture diagram source (Mermaid). Rendered inline in docs/design.md on GitHub.
+flowchart LR
+  subgraph Clients["Client health plans' rep desktops"]
+    RA["Harborview reps<br/>(plan_a)"]
+    RB["Prairie Sky reps<br/>(plan_b)"]
+  end
+  IDP["Client identity providers<br/>(OIDC, tenant claim)"]
+
+  subgraph AWS["AWS - one region, 3 Availability Zones"]
+    WAF["ALB + AWS WAF<br/>private, TLS"]
+    subgraph ECS["ECS Fargate service: assistant (stateless, 3 AZs)"]
+      API["HTTP API<br/>tenant from token"]
+      AGENT["Agent loop<br/>budgets, output guard"]
+      GW["Tool gateway<br/>tenant binding - PHI projection<br/>confirm-before-write - idempotency<br/>egress screen - trace"]
+      KB["Per-tenant KB indexes<br/>(loaded from S3, quarantine check)"]
+    end
+    REDIS[("ElastiCache Redis<br/>sessions, tenant-keyed cache")]
+    SM["Secrets Manager + KMS<br/>one key and token per tenant"]
+    BR["Amazon Bedrock - Claude<br/>(VPC endpoint, no retention)"]
+    FH["Kinesis Firehose"]
+    AUDIT[("S3 audit store<br/>Object Lock 6 years<br/>prefix + KMS key per tenant")]
+    CW["CloudWatch metrics<br/>(no PHI)"]
+    S3KB[("S3 plan documents<br/>bucket per tenant")]
+    EGRESS["Network Firewall<br/>egress allow-list"]
+  end
+
+  subgraph PlanA["Harborview systems"]
+    SA["Member, claims,<br/>benefits, grievances"]
+  end
+  subgraph PlanB["Prairie Sky systems"]
+    SB["Member, claims,<br/>benefits, grievances"]
+  end
+  DIR["CareFinder directory<br/>(third party)"]
+
+  RA & RB --> IDP
+  RA & RB -->|"HTTPS + OIDC token"| WAF --> API --> AGENT
+  AGENT -->|"model calls"| BR
+  AGENT -->|"every tool call"| GW
+  GW --> KB
+  S3KB --> KB
+  GW --> REDIS
+  GW --> SM
+  GW -->|"plan_a token only"| SA
+  GW -->|"plan_b token only"| SB
+  GW -->|"specialty, network, ZIP only"| EGRESS --> DIR
+  GW -->|"redacted trace"| FH --> AUDIT
+  API --> CW
