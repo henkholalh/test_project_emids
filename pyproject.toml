@@ -31,3 +31,4 @@ where = ["src"]
 testpaths = ["tests"]
 markers = ["integration: needs the supplied pack and the mock server"]
 addopts = "-ra"
+asyncio_default_fixture_loop_scope = "function"
