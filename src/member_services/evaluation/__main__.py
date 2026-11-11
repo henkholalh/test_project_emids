@@ -54,12 +54,16 @@ def cmd_run(args) -> int:
     disputed = load_disputed(EVAL_DIR / "disputed_cases.yaml")
     judge_llm = None
     if args.judge != "off":
-        key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
-        judge_llm = AnthropicLLM(model=args.judge, api_key=key, effort="low", refusal_fallback=False) \
-            if settings.llm_provider == "anthropic" else FakeLLM()
+        if settings.llm_provider == "fake":
+            judge_llm = FakeLLM()
+        elif settings.anthropic_api_key is None:
+            print("note: no ANTHROPIC_API_KEY for the judge; judged checks are recorded as 'not judged'")
+        else:
+            judge_llm = AnthropicLLM(model=args.judge, api_key=settings.anthropic_api_key.get_secret_value(),
+                                     effort="low", refusal_fallback=False)
     judge = Judge(judge_llm)
     run_dir = EVAL_DIR / "runs" / datetime.now().strftime("%Y%m%d-%H%M%S")
-    model = settings.llm_model if settings.llm_provider == "anthropic" else "fake"
+    model = "fake" if settings.llm_provider == "fake" else settings.llm_model
 
     def do_pass(i: int, model_override=None) -> list[dict]:
         t0 = time.time()

@@ -40,12 +40,15 @@ class Settings(BaseSettings):
     pack_dir: Path = Path("../T4_Lead_AI_Architect_A")
     mock_base_url: str = "http://127.0.0.1:8090"
 
-    llm_provider: Literal["anthropic", "fake"] = "anthropic"
+    llm_provider: Literal["anthropic", "openai_compat", "fake"] = "anthropic"
     llm_model: str = "claude-sonnet-5-5"
     llm_effort: Literal["low", "medium", "high"] = "low"
     llm_timeout_s: float = Field(20.0, gt=0)
     llm_refusal_fallback: bool = True
     anthropic_api_key: SecretStr | None = None
+    # OpenAI-compatible endpoints (Ollama, vLLM, OpenAI, ...), used when LLM_PROVIDER=openai_compat.
+    openai_base_url: str = "http://localhost:11434/v1"
+    openai_api_key: SecretStr | None = None
 
     # NoDecode: parse the JSON ourselves so a malformed value gives a clean error with no value echoed.
     tenant_tokens: Annotated[dict[str, SecretStr], NoDecode] = Field(default_factory=dict)
