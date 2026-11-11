@@ -7,6 +7,8 @@ from environment variables or a local ``.env`` file. Nothing secret has a defaul
 from __future__ import annotations
 
 import json
+import secrets
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
@@ -49,6 +51,16 @@ class Settings(BaseSettings):
     directory_api_key: SecretStr | None = None
 
     budgets: Budgets = Field(default_factory=Budgets)
+
+    # "Today" for deadline calculations. Unset in production (system date); the eval pack fixes it.
+    as_of_date: date | None = None
+    trace_dir: Path | None = Path("traces")
+    # Key for pseudonymising identifiers in traces. Set a stable secret in production so audit records correlate.
+    trace_hash_key: SecretStr = Field(default_factory=lambda: SecretStr(secrets.token_hex(32)))
+    claims_parallel_pages: int = Field(2, ge=0, le=5)
+
+    def today(self) -> date:
+        return self.as_of_date or date.today()
 
     @field_validator("pack_dir")
     @classmethod

@@ -41,3 +41,10 @@ def test_no_secrets_or_ssns_in_repo():
             continue
         hits += [f"{rel}: {name}" for name, rx in SECRET_PATTERNS.items() if rx.search(text)]
     assert not hits, f"possible secrets or PHI committed: {hits}"
+
+
+def test_gitignore_does_not_hide_source_files():
+    """Pack paths are anchored to the repo root; an unanchored 'kb/' once hid src/member_services/kb."""
+    src = [str(p.relative_to(ROOT)) for p in (ROOT / "src").rglob("*.py")]
+    res = subprocess.run(["git", "check-ignore", "--no-index", *src], cwd=ROOT, capture_output=True, text=True)
+    assert res.stdout.strip() == "", f"source files ignored by .gitignore: {res.stdout.split()}"

@@ -1,10 +1,10 @@
 # --- Supplied evaluation pack: never commit (client owns it; treat as real PHI) ---
-mock_services/
-kb/
-data/
-tools/
-eval/conversations.json
-BRIEF.md
+/mock_services/
+/kb/
+/data/
+/tools/
+/eval/conversations.json
+/BRIEF.md
 **/members.json
 **/claims.json
 **/accumulators.json
