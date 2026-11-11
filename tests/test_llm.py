@@ -114,3 +114,9 @@ def test_factory_selects_provider(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     llm = make_llm(Settings())
     assert isinstance(llm, AnthropicLLM) and llm.model == "claude-sonnet-5-5"
+
+
+def test_fallback_only_enabled_for_models_that_support_it():
+    client, api = stub_client(sample_response())
+    AnthropicLLM("claude-haiku-5-5", client=client).complete("S", [], [])
+    assert "fallbacks" not in api.calls[0]

@@ -1,0 +1,34 @@
+# Eval expectations that contradict the supplied data or the tenant-isolation rule.
+# The agent is NOT tuned to these expectations. Each case is scored twice in the report:
+#   raw      - against the eval file as written
+#   adjusted - against supported_facts, which the systems of record and the tenant's own documents support
+# Evidence is described by source, not copied from member records.
+
+disputed:
+  - id: EV-23
+    supported_facts: ["$25 copay"]
+    reason: >-
+      The expected "$0 copay, up to 20 sessions" comes from kb/plan_a/virtual_care_2026.md, whose front-matter says
+      tenant plan_b and whose content is Prairie Sky Health's Virtual Care Benefit. It is misfiled in the plan_a
+      folder and quarantined by the loader. The member is on Harborview Gold PPO, whose 2026 summary lists
+      "Behavioral health outpatient visit (in person or virtual): $25 copay". Matching the expected answer would
+      put one client's benefit in front of another client's rep (NFR-4).
+
+  - id: EV-25
+    supported_facts: ["$2,330.88"]
+    reason: >-
+      The member is on Harborview Silver HMO. The 2026 summary gives an individual in-network deductible of $2,500;
+      the benefits API reports the 2026 amount met. The expected value equals the 2027 deductible ($3,000) minus the
+      2026 amount met. The question is about the current (2026) plan year.
+
+  - id: EV-34
+    supported_facts: ["DENIED"]
+    reason: >-
+      The claims API returns status DENIED (CARC CO-16) for this claim, not PAID. The assistant reports the system
+      of record.
+
+  - id: EV-37
+    supported_facts: ["$15 copay"]
+    reason: >-
+      The member record and the benefits API show Prairie Sky Choice PPO. The expected "$10 copay after deductible"
+      is the Value HDHP benefit. The Choice PPO 2026 summary lists generic drugs (Tier 1, 30-day retail) at $15.

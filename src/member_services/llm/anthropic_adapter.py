@@ -19,6 +19,8 @@ import anthropic
 from .base import LLMError, LLMResponse, Message, ToolCall, ToolSpec, Usage
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+# Models that accept server-side refusal fallback on the Claude API. Others (e.g. Haiku 5.5) run without it.
+FALLBACK_MODELS = {"claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-fable-5"}
 _STOP_MAP = {"end_turn": "end_turn", "tool_use": "tool_use", "max_tokens": "max_tokens", "refusal": "refusal"}
 
 
@@ -27,7 +29,7 @@ class AnthropicLLM:
                  refusal_fallback: bool = True, client: Any | None = None):
         self.model = model
         self.effort = effort
-        self.refusal_fallback = refusal_fallback
+        self.refusal_fallback = refusal_fallback and model in FALLBACK_MODELS
         # The SDK resolves credentials from the environment when api_key is None.
         self._client = client or anthropic.Anthropic(api_key=api_key, timeout=timeout_s, max_retries=2)
 
