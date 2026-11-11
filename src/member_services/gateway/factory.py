@@ -11,8 +11,7 @@ from ..clients.http import CircuitBreaker
 from ..clients.member_api import MemberAPI
 from ..config import ConfigError, Settings
 from ..context import SessionContext
-from ..kb.documents import LoadReport, load_tenant_documents
-from ..kb.policies import TenantPolicy, policy_from_documents
+from ..kb.knowledge import TenantKnowledge, load_knowledge
 from .budget import BudgetTracker
 from .gateway import ToolGateway
 from .phi import Redactor
@@ -23,9 +22,9 @@ _BREAKER = CircuitBreaker()
 
 
 @lru_cache(maxsize=16)
-def tenant_policy(kb_dir: Path, tenant: str) -> TenantPolicy:
-    report = LoadReport()
-    return policy_from_documents(tenant, load_tenant_documents(kb_dir, tenant, report))
+def tenant_knowledge(kb_dir: Path, tenant: str) -> TenantKnowledge:
+    """Loaded once per tenant and shared read-only by that tenant's sessions only."""
+    return load_knowledge(kb_dir, tenant)
 
 
 def build_gateway(settings: Settings, ctx: SessionContext, *, http: httpx.Client | None = None,
@@ -41,6 +40,6 @@ def build_gateway(settings: Settings, ctx: SessionContext, *, http: httpx.Client
         directory = DirectoryAPI(settings.mock_base_url, settings.directory_api_key.get_secret_value(),
                                  http=directory_http or http, breaker=_BREAKER, sleep=sleep)
     return ToolGateway(ctx, api=api, directory=directory,
-                       policy=tenant_policy(settings.pack_dir / "kb", ctx.tenant),
+                       knowledge=tenant_knowledge(settings.pack_dir / "kb", ctx.tenant),
                        budget=BudgetTracker(settings.budgets), tracer=tracer, redactor=redactor,
                        today=settings.today())

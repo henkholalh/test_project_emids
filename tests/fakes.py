@@ -23,7 +23,7 @@ from member_services.gateway.budget import BudgetTracker
 from member_services.gateway.gateway import ToolGateway
 from member_services.gateway.phi import Redactor
 from member_services.gateway.trace import Tracer
-from member_services.kb.policies import TenantPolicy
+from member_services.kb.knowledge import load_knowledge
 
 TOKENS = {"tenant_x": "tok-x", "tenant_y": "tok-y"}
 DIR_KEY = "dir-key"
@@ -137,8 +137,8 @@ class FakeUpstream:
         return httpx.Client(transport=httpx.MockTransport(self.handler), base_url="http://fake")
 
 
-POLICY = {"tenant_x": TenantPolicy("tenant_x", 30, 180, "tenant_x/guide"),
-          "tenant_y": TenantPolicy("tenant_y", 45, 180, "tenant_y/guide")}
+FIXTURE_KB = Path(__file__).parent / "fixtures" / "kb"
+KNOWLEDGE = {t: load_knowledge(FIXTURE_KB, t) for t in ("tenant_x", "tenant_y")}
 
 
 def make_gateway(up: FakeUpstream, tenant="tenant_x", member="M100001", *, max_steps=20,
@@ -152,5 +152,5 @@ def make_gateway(up: FakeUpstream, tenant="tenant_x", member="M100001", *, max_s
                     retry=RetryPolicy(attempts=3), sleep=no_sleep)
     directory = DirectoryAPI("http://fake", DIR_KEY, http=http, breaker=CircuitBreaker(), sleep=no_sleep)
     budget = BudgetTracker(Budgets(max_steps=max_steps, max_cost_usd=1.0, max_latency_s=60))
-    return ToolGateway(ctx, api=api, directory=directory, policy=POLICY[tenant], budget=budget, tracer=tracer,
+    return ToolGateway(ctx, api=api, directory=directory, knowledge=KNOWLEDGE[tenant], budget=budget, tracer=tracer,
                        redactor=redactor, today=date(2026, 11, 15))

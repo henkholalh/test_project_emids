@@ -23,7 +23,7 @@ from ..clients.directory import DirectoryAPI, OutboundPHIBlocked
 from ..clients.http import UpstreamError
 from ..clients.member_api import MemberAPI, NotFound
 from ..context import SessionContext
-from ..kb.policies import TenantPolicy
+from ..kb.knowledge import TenantKnowledge
 from ..llm.base import ToolCall, ToolResult, ToolSpec
 from .budget import BudgetExceeded, BudgetTracker
 from .grievances import CATEGORIES, GrievanceError, GrievanceWorkflow
@@ -56,6 +56,12 @@ TOOL_SPECS: list[ToolSpec] = [
                    "status": {"type": "string", "enum": ["IN_PROCESS", "PENDED", "PAID", "DENIED"]}})),
     ToolSpec("get_claim", "One claim of the member on this call, by claim id (for example C2639555547).",
              _obj({"claim_id": {"type": "string"}}, ["claim_id"])),
+    ToolSpec("search_plan_documents",
+             "Search this member's plan documents (benefit summary for the member's product, member services "
+             "guide, claim codes). Returns matching table rows and passages with their source. Use plan_year "
+             "2027 only for questions about the plan after January 1, 2027 (renewal); otherwise omit it.",
+             _obj({"query": {"type": "string", "description": "What to look up, e.g. 'specialist visit'"},
+                   "plan_year": {"type": "integer", "minimum": 2000, "maximum": 2100}}, ["query"])),
     ToolSpec("list_grievances",
              "Grievances on file for the member, with the plan's resolution deadline and whether it has passed.",
              _obj({})),
@@ -112,20 +118,25 @@ def _check_args(spec: ToolSpec, args: dict) -> str | None:
 
 class ToolGateway:
     def __init__(self, ctx: SessionContext, *, api: MemberAPI, directory: DirectoryAPI | None,
-                 policy: TenantPolicy, budget: BudgetTracker, tracer: Tracer, redactor: Redactor, today: date):
+                 knowledge: TenantKnowledge, budget: BudgetTracker, tracer: Tracer, redactor: Redactor, today: date):
         if api.ctx != ctx:
             raise ValueError("API client is bound to a different session")
-        self.ctx, self.api, self.directory, self.policy = ctx, api, directory, policy
+        if knowledge.tenant != ctx.tenant:
+            raise ValueError("knowledge base belongs to a different tenant")
+        self.ctx, self.api, self.directory, self.kb = ctx, api, directory, knowledge
+        self.policy = knowledge.policy
         self.budget, self.tracer, self.redactor, self.today = budget, tracer, redactor, today
         self.grievances = GrievanceWorkflow(ctx, api)
         self._cache: dict[str, Any] = {}
         self._ssn_checks = 0
         self._member: dict | None = None
+        for path, reason in knowledge.report.quarantined:
+            self.tracer.decision("kb_quarantine", allowed=False, reason=reason, document=path)
         self.member_found = self._bind_member()
         self._handlers: dict[str, Callable[..., Any]] = {
             "get_member_profile": self._get_member_profile, "get_benefits": self._get_benefits,
             "list_claims": self._list_claims, "get_claim": self._get_claim,
-            "list_grievances": self._list_grievances, "verify_ssn_last4": self._verify_ssn_last4,
+            "list_grievances": self._list_grievances, "search_plan_documents": self._search_plan_documents, "verify_ssn_last4": self._verify_ssn_last4,
             "find_providers": self._find_providers, "propose_grievance": self._propose_grievance,
             "file_grievance": self._file_grievance,
         }
@@ -221,6 +232,26 @@ class ToolGateway:
 
     def _get_benefits(self) -> dict:
         b = project_benefits(self._cached("benefits", self.api.get_benefits))
+        acc = b.get("accumulators") or {}
+        design = self.kb.plan(b.get("product_code") or "", int(acc.get("plan_year") or self.today.year))
+        if design and acc:
+            remaining = {
+                "plan_year": design.plan_year,
+                "deductible_individual": design.deductible_individual,
+                "deductible_remaining_individual": round(max(0.0, design.deductible_individual
+                                                             - float(acc.get("deductible_met_individual") or 0)), 2),
+                "out_of_pocket_max_individual": design.oop_max_individual,
+                "out_of_pocket_remaining_individual": round(max(0.0, design.oop_max_individual
+                                                                - float(acc.get("out_of_pocket_met_individual")
+                                                                        or 0)), 2),
+                "network": "in-network amounts",
+                "source": design.doc_id,
+            }
+            if design.pt_visit_limit is not None:
+                remaining["physical_therapy_visit_limit"] = design.pt_visit_limit
+                remaining["physical_therapy_visits_remaining"] = max(
+                    0, design.pt_visit_limit - int(acc.get("physical_therapy_visits_used") or 0))
+            b["remaining"] = remaining
         if b.get("coverage_status") == "TERMINATED":
             b["notice"] = (f"Coverage is not active. It ended on {b.get('coverage_termination')}. Services after "
                            "that date are not covered.")
@@ -236,6 +267,11 @@ class ToolGateway:
                            "window_open": self.today <= deadline,
                            "rule": f"{self.policy.appeal_window_days} calendar days from the denial notice "
                                    f"(processed date)"}
+        if v.get("denial"):
+            code = self.kb.denial_codes.get(v["denial"].get("carc") or "")
+            if code:
+                v["denial"]["what_to_tell_member"] = code.what_to_tell_member
+                v["denial"]["source"] = code.doc_id
         notes = claim.get("notes") or []
         if notes:
             v["untrusted_text"] = {"notes": [{"date": n.get("date"), "author": n.get("author"),
@@ -279,6 +315,19 @@ class ToolGateway:
                 v["rule"] = f"{self.policy.grievance_resolution_days} calendar days from receipt"
             out.append(v)
         return {"today": self.today.isoformat(), "grievances": out}
+
+    def _search_plan_documents(self, query: str, plan_year: int | None = None) -> dict:
+        product = (self._member or {}).get("product_code") or ""
+        year = plan_year or self.today.year
+        available = self.kb.index.years(product)
+        if available and year not in available:
+            return {"results": [], "message": f"No plan documents for {year}. Available years: {available}."}
+        hits = self.kb.index.search(query, product_code=product, plan_year=year, k=5)
+        self.tracer.decision("retrieval_scope", allowed=True, reason="tenant, product and year filtered",
+                             product_code=product, plan_year=year, docs=sorted({h.chunk.doc_id for h in hits}))
+        return {"product_code": product, "plan_year": year,
+                "results": [{"text": h.chunk.text, "source": h.chunk.doc_id, "product": h.chunk.product,
+                             "plan_year": h.chunk.plan_year} for h in hits]}
 
     def _verify_ssn_last4(self, last4: str) -> dict:
         if not (isinstance(last4, str) and len(last4) == 4 and last4.isdigit()):
