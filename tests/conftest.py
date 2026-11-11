@@ -1,3 +1,5 @@
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
 import pytest
 
 from member_services.config import Settings
