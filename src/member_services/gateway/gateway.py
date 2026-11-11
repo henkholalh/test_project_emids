@@ -16,6 +16,7 @@ write, because writes need a rep confirmation that only the rep's own turn can g
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import Any, Callable
 
@@ -159,11 +160,13 @@ class ToolGateway:
         self.tracer.decision("member_binding", allowed=True, reason="member found in session tenant")
         return True
 
-    def on_rep_turn(self, text: str, confirm_action_id: str | None = None) -> None:
+    def on_rep_turn(self, text: str, confirm_action_id: str | None = None) -> str | None:
+        """Called with every rep message before the model sees it. Returns 'confirmed', 'cancelled' or None."""
         outcome = self.grievances.on_rep_turn(text, confirm_action_id)
         if outcome:
             self.tracer.decision("grievance_confirmation", allowed=outcome == "confirmed",
                                  reason=f"pending grievance {outcome} by rep turn")
+        return outcome
 
     # ---- dispatch -------------------------------------------------------------------
     def execute(self, call: ToolCall) -> ToolResult:
@@ -221,10 +224,61 @@ class ToolGateway:
         return self._cache[key]
 
     def prefetch(self) -> None:
-        """Load the data most questions need, ahead of the first model call (latency, NFR-3)."""
-        if self.member_found:
-            self._cached("benefits", self.api.get_benefits)
-            self._cached("claims", self.api.list_claims)
+        """Load benefits, claims and grievances in parallel when the rep opens the member, before the first
+        question (latency, NFR-3). A failure here is not fatal: the tools fetch again on demand."""
+        if not self.member_found:
+            return
+        jobs = {"benefits": self.api.get_benefits, "claims": self.api.list_claims,
+                "grievances": self.api.list_grievances}
+        timer = self.tracer.timer()
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+            futures = {k: pool.submit(fn) for k, fn in jobs.items() if k not in self._cache}
+            failed = []
+            for k, f in futures.items():
+                try:
+                    self._cache[k] = f.result()
+                except UpstreamError:
+                    failed.append(k)
+        self.tracer.emit("prefetch", "session_open", latency_ms=timer.ms, failed=failed)
+
+    def session_context(self) -> dict:
+        """Compact, projected facts for the member on the call, given to the model with the first question so
+        most questions need no tool round-trip (latency and cost, NFR-3/NFR-7). Same allow-lists as the tools;
+        claim notes and grievance text are left out here and only available through the tools."""
+        if not self.member_found:
+            return {}
+        ctx: dict[str, Any] = {"today": self.today.isoformat(), "member": self._get_member_profile()}
+        try:
+            ctx["benefits"] = self._get_benefits()
+        except UpstreamError:
+            ctx["benefits"] = "unavailable; use get_benefits"
+        try:
+            claims = self._cached("claims", self.api.list_claims)
+            compact = []
+            for c in claims:
+                v = self._claim_view(c)
+                item = {"claim_id": v["claim_id"], "service_date": v["service_date"],
+                        "service": v.get("service", {}).get("description"), "status": v["status"],
+                        "plan_paid": v.get("plan_paid"), "member_owes": v["member_owes"]}
+                if v.get("denial"):
+                    item["denial"] = v["denial"]
+                if v.get("appeal"):
+                    item["appeal"] = {k: v["appeal"][k] for k in ("deadline", "window_open")}
+                if v.get("untrusted_text"):
+                    item["has_notes"] = True  # details via get_claim
+                compact.append(item)
+            ctx["claims"] = compact
+        except UpstreamError:
+            ctx["claims"] = "unavailable; use list_claims"
+        product = (self._member or {}).get("product_code") or ""
+        for key, year in (("plan_benefits_current_year", self.today.year),
+                          ("plan_benefits_next_year", self.today.year + 1)):
+            design = self.kb.plan(product, year)
+            if design:
+                ctx[key] = {"plan_year": design.plan_year, "product": design.product, "source": design.doc_id,
+                            "rows": [f"{r.benefit}: in-network {r.in_network}; out-of-network {r.out_of_network}"
+                                     for r in design.rows]}
+        return ctx
 
     # ---- tools ----------------------------------------------------------------------
     def _get_member_profile(self) -> dict:

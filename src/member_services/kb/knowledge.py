@@ -18,6 +18,7 @@ class TenantKnowledge:
     plans: dict[tuple[str, int], PlanDesign] = field(default_factory=dict)
     denial_codes: dict[str, DenialCode] = field(default_factory=dict)
     report: LoadReport = field(default_factory=LoadReport)
+    client_name: str = ""
 
     def plan(self, product_code: str, plan_year: int) -> PlanDesign | None:
         return self.plans.get((product_code, plan_year))
@@ -33,5 +34,8 @@ def load_knowledge(kb_dir: Path, tenant: str) -> TenantKnowledge:
             plans[(p.product_code, p.plan_year)] = p
         elif "denial codes" in d.title.lower():
             codes.update(parse_denial_codes(d))
-    return TenantKnowledge(tenant=tenant, policy=policy_from_documents(tenant, docs), index=TenantIndex(tenant, docs),
-                           plans=plans, denial_codes=codes, report=report)
+    policy = policy_from_documents(tenant, docs)
+    guide = next(d for d in docs if d.doc_id == policy.source_doc)
+    client_name = guide.title.split(":")[0].strip()  # "Harborview Health Plan: Member services guide"
+    return TenantKnowledge(tenant=tenant, policy=policy, index=TenantIndex(tenant, docs), plans=plans,
+                           denial_codes=codes, report=report, client_name=client_name)

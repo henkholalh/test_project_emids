@@ -106,6 +106,14 @@ class Redactor:
         s = DOB_CONTEXT_RE.sub(lambda m: m.group(1) + " [DOB]", s)
         return s
 
+    def answer(self, s: str) -> str:
+        """Guard for text going back to the rep: masks the member's own identity values and SSN-shaped strings,
+        but keeps provider phone numbers and addresses, which reps are allowed to share."""
+        for value, label in self._values:
+            if label in ("[SSN]", "[DOB]", "[PHONE]", "[EMAIL]", "[ADDRESS]"):
+                s = s.replace(value, label)
+        return SSN_RE.sub("[SSN]", s)
+
     def value(self, v: Any) -> Any:
         if isinstance(v, str):
             return self.text(v)

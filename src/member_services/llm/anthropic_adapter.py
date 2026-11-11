@@ -67,6 +67,9 @@ class AnthropicLLM:
             "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             "messages": self._messages(messages),
             "output_config": {"effort": self.effort},
+            # Automatic breakpoint at the end of the conversation so later model calls in the same turn, and the
+            # next turn, read the shared history from cache.
+            "cache_control": {"type": "ephemeral"},
         }
         if tools:
             req["tools"] = self._tools(tools)
